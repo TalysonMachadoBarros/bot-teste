@@ -1,0 +1,134 @@
+import zipfile
+import os
+
+project_files = {
+    "colab_bot/bot.py": '''
+import discord
+from discord.ext import commands
+from database import add_user, remove_user, get_all_users
+from scheduler import schedule_removal
+import json
+
+with open("config.json") as f:
+    config = json.load(f)
+
+intents = discord.Intents.default()
+intents.members = True
+
+bot = commands.Bot(command_prefix="/", intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f"✅ Bot conectado como {bot.user}")
+    for user_id, guild_id, expire_at in get_all_users():
+        schedule_removal(bot, user_id, guild_id, expire_at)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def comprar(ctx, membro: discord.Member, nick_jogo: str, tipo: str):
+    tipo = tipo.lower()
+    cargo_id = config["cargos"].get(tipo)
+    if not cargo_id:
+        await ctx.send("❌ Tipo de colab inválido. Use: bronze, prata, ouro...")
+        return
+
+    role = discord.utils.get(ctx.guild.roles, id=cargo_id)
+    await membro.add_roles(role)
+    await ctx.send(f"✅ Cargo '{tipo}' adicionado para {membro.mention}\\n🎮 Comando para o jogo: `/givevip {nick_jogo}`\\n⏳ Expira em 30 dias.")
+
+    add_user(membro.id, ctx.guild.id)
+    schedule_removal(bot, membro.id, ctx.guild.id)
+
+bot.run(config["token"])
+''',
+
+    "colab_bot/database.py": '''
+import sqlite3
+import time
+
+conn = sqlite3.connect("colabs.db")
+c = conn.cursor()
+c.execute('''CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER,
+    guild_id INTEGER,
+    expire_at INTEGER
+)''')
+conn.commit()
+
+def add_user(user_id, guild_id):
+    expire_at = int(time.time()) + 30 * 86400
+    c.execute("INSERT INTO users VALUES (?, ?, ?)", (user_id, guild_id, expire_at))
+    conn.commit()
+
+def remove_user(user_id, guild_id):
+    c.execute("DELETE FROM users WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
+    conn.commit()
+
+def get_all_users():
+    return c.execute("SELECT * FROM users").fetchall()
+''',
+
+    "colab_bot/scheduler.py": '''
+from apscheduler.schedulers.background import BackgroundScheduler
+import time
+from database import remove_user
+import asyncio
+import json
+import discord
+
+with open("config.json") as f:
+    config = json.load(f)
+
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+def schedule_removal(bot, user_id, guild_id, expire_at=None):
+    if expire_at is None:
+        expire_at = int(time.time()) + 30 * 86400
+
+    delay = expire_at - int(time.time())
+
+    async def remove():
+        guild = bot.get_guild(guild_id)
+        member = guild.get_member(user_id)
+        if not member:
+            return
+        for role_id in config["cargos"].values():
+            role = discord.utils.get(guild.roles, id=role_id)
+            if role in member.roles:
+                await member.remove_roles(role)
+        remove_user(user_id, guild_id)
+        print(f"⏳ Cargo removido de {member} (expiração automática)")
+
+    scheduler.add_job(lambda: asyncio.run(remove()), 'date', run_date=time.time() + delay)
+''',
+
+    "colab_bot/config.json": '''
+{
+  "token": "SEU_TOKEN_AQUI",
+  "cargos": {
+    "bronze": 123456789012345678,
+    "prata": 234567890123456789,
+    "ouro": 345678901234567890
+  }
+}
+''',
+
+    "colab_bot/requirements.txt": '''
+discord.py
+apscheduler
+''',
+
+    "colab_bot/README.md": '''
+# Bot de Colabs - Discord + Path of Titans
+
+### ✅ Funcionalidades:
+- Admin executa `/comprar @user nick tipo`
+- Bot dá o cargo certo (bronze, prata, ouro...)
+- Imprime comando do jogo (`/givevip nick`)
+- Remove cargo após 30 dias
+
+### 🚀 Como usar:
+
+1. Instale o Python 3.10+
+2. No terminal:
