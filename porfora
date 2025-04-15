@@ -1,0 +1,22 @@
+pip install -r requirements.txt
+
+markdown
+Copiar
+Editar
+3. Edite o arquivo `config.json` com seu token e cargos
+4. Execute o bot:
+python bot.py
+
+rust
+Copiar
+Editar
+''',
+}
+
+with zipfile.ZipFile("colab_bot.zip", 'w') as zipf:
+    for path, content in project_files.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content.strip())
+        zipf.write(path)
+print("✅ Arquivo colab_bot.zip criado com sucesso!")
